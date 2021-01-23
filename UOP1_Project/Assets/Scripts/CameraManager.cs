@@ -1,34 +1,98 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System;
 using UnityEngine;
 using Cinemachine;
-using System;
+using System.Collections;
 
 public class CameraManager : MonoBehaviour
 {
 	public InputReader inputReader;
-    public CinemachineFreeLook freeLookVCam;
+	public Camera mainCamera;
+	public CinemachineFreeLook freeLookVCam;
+	private bool _isRMBPressed;
 
- 	[Tooltip("General multiplier for camera sensitivity/speed")]
-	[Range(1.0f, 20.0f)]
-	[SerializeField] private float cameraSensitivity = 7.0f;
+	[SerializeField, Range(.5f, 3f)]
+	private float _speedMultiplier = 1f; //TODO: make this modifiable in the game settings
+	[SerializeField] private TransformAnchor _cameraTransformAnchor = default;
+
+	[Header("Listening on channels")]
+	[Tooltip("The CameraManager listens to this event, fired by objects in any scene, to adapt camera position")]
+	[SerializeField] private TransformEventChannelSO _frameObjectChannel = default;
+
+
+	private bool _cameraMovementLock = false;
+
+	public void SetupProtagonistVirtualCamera(Transform target)
+	{
+		freeLookVCam.Follow = target;
+		freeLookVCam.LookAt = target;
+	}
 
 	private void OnEnable()
 	{
 		inputReader.cameraMoveEvent += OnCameraMove;
-		//...
+		inputReader.enableMouseControlCameraEvent += OnEnableMouseControlCamera;
+		inputReader.disableMouseControlCameraEvent += OnDisableMouseControlCamera;
+
+		if (_frameObjectChannel != null)
+			_frameObjectChannel.OnEventRaised += OnFrameObjectEvent;
+
+		_cameraTransformAnchor.Transform = mainCamera.transform;
 	}
 
-	//Removes all listeners to the events coming from the InputReader script
 	private void OnDisable()
 	{
 		inputReader.cameraMoveEvent -= OnCameraMove;
-		//...
+		inputReader.enableMouseControlCameraEvent -= OnEnableMouseControlCamera;
+		inputReader.disableMouseControlCameraEvent -= OnDisableMouseControlCamera;
+
+		if (_frameObjectChannel != null)
+			_frameObjectChannel.OnEventRaised -= OnFrameObjectEvent;
 	}
 
-	private void OnCameraMove(Vector2 cameraMovement)
+	private void OnEnableMouseControlCamera()
 	{
-		freeLookVCam.m_XAxis.m_InputAxisValue = cameraMovement.x * Time.smoothDeltaTime * cameraSensitivity;
-		freeLookVCam.m_YAxis.m_InputAxisValue = cameraMovement.y * Time.smoothDeltaTime * cameraSensitivity;
+		_isRMBPressed = true;
+
+		Cursor.lockState = CursorLockMode.Locked;
+		Cursor.visible = false;
+
+		StartCoroutine(DisableMouseControlForFrame());
+	}
+
+	IEnumerator DisableMouseControlForFrame()
+	{
+		_cameraMovementLock = true;
+		yield return new WaitForEndOfFrame();
+		_cameraMovementLock = false;
+	}
+
+	private void OnDisableMouseControlCamera()
+	{
+		_isRMBPressed = false;
+
+		Cursor.lockState = CursorLockMode.None;
+		Cursor.visible = true;
+
+		// when mouse control is disabled, the input needs to be cleared
+		// or the last frame's input will 'stick' until the action is invoked again
+		freeLookVCam.m_XAxis.m_InputAxisValue = 0;
+		freeLookVCam.m_YAxis.m_InputAxisValue = 0;
+	}
+
+	private void OnCameraMove(Vector2 cameraMovement, bool isDeviceMouse)
+	{
+		if (_cameraMovementLock)
+			return;
+
+		if (isDeviceMouse && !_isRMBPressed)
+			return;
+
+		freeLookVCam.m_XAxis.m_InputAxisValue = cameraMovement.x * Time.smoothDeltaTime * _speedMultiplier;
+		freeLookVCam.m_YAxis.m_InputAxisValue = cameraMovement.y * Time.smoothDeltaTime * _speedMultiplier;
+	}
+
+	private void OnFrameObjectEvent(Transform value)
+	{
+		SetupProtagonistVirtualCamera(value);
 	}
 }
